@@ -38,8 +38,17 @@ class TestExistingStore(util.CliTester):
 class TestPublishPE(util.CliTester):
     initial_dir_zip = "existing_store.zip"
 
-    def test_add_pdb(self):
+    def test_add_pe(self):
         self.run_add_command(["--product-name", "peprods",
                               "--product-version", "1.0.1"],
                              ["dummyprog.exe", "dummylib.dll"])
         self.assertSymstoreDir("pe_store.zip")
+
+
+class TestPublishCabs(util.CliTester):
+    initial_dir_zip = "new_store.zip"
+
+    def test_add_cabs(self):
+        self.run_add_command(["--product-name", "dummyprod"],
+                             ["dummyprog.ex_", "dummylib.pd_", "dummylib.dl_"])
+        self.assertSymstoreDir("cab_store.zip")

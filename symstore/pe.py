@@ -34,9 +34,32 @@ OPTIONAL_HEADER_OFFSET = \
 SIZE_OF_IMAGE_OFFSET = 56
 
 
-class PEFile:
+class PEStream:
+    def __init__(self, stream):
+        stream.seek(PE_SIGNATURE_POINTER)
+
+        # load PE signature offset
+        pe_sig_offset, = struct.unpack("<i", stream.read(4))
+
+        # check that file contains valid PE signature
+        stream.seek(pe_sig_offset)
+        if stream.read(4) != PE_SIGNATURE:
+            raise ValueError("PE signature not found")
+
+        # load TimeDateStamp field
+        stream.seek(pe_sig_offset + TIME_DATE_STAMP_OFFSET)
+        self.TimeDateStamp, = struct.unpack("<i", stream.read(4))
+
+        # load SizeOfImage field
+        stream.seek(pe_sig_offset +
+                    OPTIONAL_HEADER_OFFSET +
+                    SIZE_OF_IMAGE_OFFSET)
+        self.SizeOfImage, = struct.unpack("<i", stream.read(4))
+
+
+class PEFile(PEStream):
     """
-    Simple PE file parser, that loads two fields used by symstore:
+    Simple PE file parser, that loads the two fields used by symstore:
 
     * TimeDateStamp from file header
     * SizeOfImage from optional header
@@ -48,22 +71,4 @@ class PEFile:
     """
     def __init__(self, filepath):
         with io.open(filepath, "rb") as f:
-            f.seek(PE_SIGNATURE_POINTER)
-
-            # load PE signature offset
-            pe_sig_offset, = struct.unpack("<i", f.read(4))
-
-            # check that file contains valid PE signature
-            f.seek(pe_sig_offset)
-            if f.read(4) != PE_SIGNATURE:
-                raise ValueError("PE signature not found")
-
-            # load TimeDateStamp field
-            f.seek(pe_sig_offset+TIME_DATE_STAMP_OFFSET)
-            self.TimeDateStamp, = struct.unpack("<i", f.read(4))
-
-            # load SizeOfImage field
-            f.seek(pe_sig_offset +
-                   OPTIONAL_HEADER_OFFSET +
-                   SIZE_OF_IMAGE_OFFSET)
-            self.SizeOfImage, = struct.unpack("<i", f.read(4))
+            PEStream.__init__(self, f)

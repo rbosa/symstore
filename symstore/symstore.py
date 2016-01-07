@@ -2,6 +2,7 @@ from __future__ import absolute_import
 
 import os
 import re
+import io
 import shutil
 import pdbparse
 import binascii
@@ -25,15 +26,39 @@ HISTORY_FILE = path.join(ADMIN_DIR, "history.txt")
 SERVER_FILE = path.join(ADMIN_DIR, "server.txt")
 PINGME_FILE = "pingme.txt"
 
-PDB_IMAGE, PE_IMAGE = range(2)
+PDB_IMAGE, CAB_PDB_IMAGE, PE_IMAGE, CAB_PE_IMAGE = range(4)
 
 EXT_TYPES = dict(pdb=PDB_IMAGE,
+                 pd_=CAB_PDB_IMAGE,
                  exe=PE_IMAGE,
-                 dll=PE_IMAGE)
+                 dll=PE_IMAGE,
+                 ex_=CAB_PE_IMAGE,
+                 dl_=CAB_PE_IMAGE)
 
 
-def _pdb_hash(filename):
-    pdb = pdbparse.parse(filename, fast_load=True)
+def _load_cab(filename):
+    import cabarchive  # import on usage to avoid hard dependency
+
+    arc = cabarchive.CabArchive()
+    arc.set_decompressor("cabextract")
+
+    arc.parse_file(filename)
+    assert len(arc.files) == 1  # TODO generate proper error message
+
+    # TODO check that we have correct file name as well
+    return io.BytesIO(arc.files[0].contents)
+
+
+def _pdb_cab_hash(filename):
+    return _pdb_hash(_load_cab(filename))
+
+
+def _pdb_file_hash(filename):
+    return _pdb_hash(open(filename, 'rb'))
+
+
+def _pdb_hash(stream):
+    pdb = pdbparse.parse_stream(stream, fast_load=True)
     # TODO 'ValueError: Unsupported file type' exception
 
     pdb.STREAM_PDB.load()
@@ -45,27 +70,43 @@ def _pdb_hash(filename):
     return "%s%s" % (guid_str, pdb.STREAM_PDB.Age)
 
 
-def _pe_hash(file):
-    pefile = pe.PEFile(file)
+def _cab_pe_hash(filename):
+    return _pe_hash(pe.PEStream(_load_cab(filename)))
 
+
+def _pe_file_hash(file):
+    return _pe_hash(pe.PEFile(file))
+
+
+def _pe_hash(pefile):
     return "%X%X" % (pefile.TimeDateStamp, pefile.SizeOfImage)
 
 
-def _image_type(file):
-    file_ext = path.splitext(file)[1][1:].lower()
-    # TODO handle cases of unknown file extensions
-    return EXT_TYPES[file_ext]
+def _file_dir(file):
 
+    basename = path.basename(file)
+    file_root, file_ext = path.splitext(basename)
+    file_ext = file_ext[1:].lower()
 
-def _file_hash(file):
-
-    image_type = _image_type(file)
+    image_type = EXT_TYPES[file_ext]
 
     if image_type == PDB_IMAGE:
-        return _pdb_hash(file)
+        file_hash = _pdb_file_hash(file)
+    elif image_type == CAB_PDB_IMAGE:
+        file_hash = _pdb_cab_hash(file)
+    elif image_type == PE_IMAGE:
+        file_hash = _pe_file_hash(file)
+    elif image_type == CAB_PE_IMAGE:
+        file_hash = _cab_pe_hash(file)
+    else:
+        assert False  # TODO proper unknown file extension error message
 
-    assert image_type == PE_IMAGE
-    return _pe_hash(file)
+    # for compressed files, we need to swap the compressed file extention to
+    # the original one in the destination path
+    if file_ext.endswith("_"):
+        file_ext = dict(pd_="pdb", ex_="exe", dl_="dll")[file_ext]
+
+    return path.join("%s.%s" % (file_root, file_ext), file_hash)
 
 
 def _new_or_empty(filename):
@@ -272,7 +313,7 @@ class Store:
         return "%.010d" % (last_id + 1)
 
     def _store_file(self, file):
-        file_dir = path.join(path.basename(file), _file_hash(file))
+        file_dir = _file_dir(file)
         dest_dir = path.join(self._path, file_dir)
 
         os.makedirs(dest_dir)
